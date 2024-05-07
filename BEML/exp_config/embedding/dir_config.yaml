@@ -1,0 +1,16 @@
+
+#元数据地址
+candidate_dir: ${run.rawdata_dir}
+
+pretrained_model: A:/ZQJ/ZQJ_CODEreporitory/productMining/productEmbedding/pretrained_bert
+exp_dir: ${run.exp_dir}
+emb_output_dir: ${run.exp_dir}/emb_products/${run.embedding_sign}
+
+
+
+selected_pt: null  # If set to null, use all PTs. If set to comma separated string, use those PTs only
+n_gpu: ${run.n_inf_gpu}
+cpu_per_job: 8
+rnd_seed: ${run.rnd_seed}
+sampling: 5  # for each attribute value, sample a few contexts that it appeared in, and use their average embedding
+batch_size: 32

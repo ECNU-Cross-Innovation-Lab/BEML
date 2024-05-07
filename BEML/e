@@ -1,0 +1,147 @@
+[1mdiff --git a/src/contextualized_sbert/__init__.py b/src/contextualized_sbert/__init__.py[m
+[1mnew file mode 100644[m
+[1mindex 0000000..b5e4c4e[m
+[1m--- /dev/null[m
+[1m+++ b/src/contextualized_sbert/__init__.py[m
+[36m@@ -0,0 +1,4 @@[m
+[32m+[m[32mfrom contextualized_sbert.models import EntityPooling, EntitySBERT, ContextualizedBinaryClfEvaluator[m
+[32m+[m[32mfrom contextualized_sbert.data import preprocess_pairwise_data,preprocess_singleproduct_data, preprocess_singleton_data, preprocess_triplet_data, load_triplet_dataset, load_binary_dataset[m
+[32m+[m[32mfrom contextualized_sbert.data import EntityContext, EncodedEntityContext, EncodedTuple, ContextualizedExample[m
+[32m+[m[32mfrom contextualized_sbert.model_utils import load_multitask_model[m
+\ No newline at end of file[m
+[1mdiff --git a/src/contextualized_sbert/__pycache__/__init__.cpython-39.pyc b/src/contextualized_sbert/__pycache__/__init__.cpython-39.pyc[m
+[1mnew file mode 100644[m
+[1mindex 0000000..1f0edbe[m
+Binary files /dev/null and b/src/contextualized_sbert/__pycache__/__init__.cpython-39.pyc differ
+[1mdiff --git a/src/contextualized_sbert/__pycache__/data.cpython-39.pyc b/src/contextualized_sbert/__pycache__/data.cpython-39.pyc[m
+[1mnew file mode 100644[m
+[1mindex 0000000..3bab47f[m
+Binary files /dev/null and b/src/contextualized_sbert/__pycache__/data.cpython-39.pyc differ
+[1mdiff --git a/src/contextualized_sbert/__pycache__/data_utils.cpython-39.pyc b/src/contextualized_sbert/__pycache__/data_utils.cpython-39.pyc[m
+[1mnew file mode 100644[m
+[1mindex 0000000..8ffe2ed[m
+Binary files /dev/null and b/src/contextualized_sbert/__pycache__/data_utils.cpython-39.pyc differ
+[1mdiff --git a/src/contextualized_sbert/__pycache__/model_utils.cpython-39.pyc b/src/contextualized_sbert/__pycache__/model_utils.cpython-39.pyc[m
+[1mnew file mode 100644[m
+[1mindex 0000000..28dd8b6[m
+Binary files /dev/null and b/src/contextualized_sbert/__pycache__/model_utils.cpython-39.pyc differ
+[1mdiff --git a/src/contextualized_sbert/__pycache__/models.cpython-39.pyc b/src/contextualized_sbert/__pycache__/models.cpython-39.pyc[m
+[1mnew file mode 100644[m
+[1mindex 0000000..9f8c357[m
+Binary files /dev/null and b/src/contextualized_sbert/__pycache__/models.cpython-39.pyc differ
+[1mdiff --git a/src/contextualized_sbert/data.py b/src/contextualized_sbert/data.py[m
+[1mnew file mode 100644[m
+[1mindex 0000000..bcc60f7[m
+[1m--- /dev/null[m
+[1m+++ b/src/contextualized_sbert/data.py[m
+[36m@@ -0,0 +1,458 @@[m
+[32m+[m[32mfrom typing import List, Tuple, Dict, Any[m
+[32m+[m[32mfrom collections import Counter, namedtuple[m
+[32m+[m[32mfrom transformers.tokenization_utils import PreTrainedTokenizer[m
+[32m+[m[32mimport logging[m
+[32m+[m[32mfrom tqdm.auto import tqdm[m
+[32m+[m[32mimport utils[m
+[32m+[m[32mimport random[m
+[32m+[m[32mfrom contextualized_sbert.data_utils import EntityContext[m
+[32m+[m
+[32m+[m[32mlogger = logging.getLogger(__name__)[m
+[32m+[m
+[32m+[m
+[32m+[m[32mContextualizedExample = namedtuple("ContextualizedExample", ["entities", "label"])[m
+[32m+[m[32mEncodedEntityContext = Dict[str, List[int]][m
+[32m+[m[32mEncodedTuple = Tuple[EncodedEntityContext, EncodedEntityContext, float][m
+[32m+[m[32mMAX_SEQ_LENGTH = 64[m
+[32m+[m
+[32m+[m
+[32m+[m[32m# 生成单个product的tokenize输出结果[m
+[32m+[m[32mdef parse_tokenizer_product_output(tokenizer_output, max_seq_length, disable_tqdm=False):[m
+[32m+[m[32m  """Take tokenized output from sequence of"""[m
+[32m+[m[32m  # all_input_ids为[[float]]，记录tokenizer化后的结果[m
+[32m+[m[32m  all_input_ids = tokenizer_output.input_ids[m
+[32m+[m[32m  dataset = [][m
+[32m+[m[32m  n_combined=len(all_input_ids)[m
+[32m+[m[32m  # print("n_combined:",n_combined)[m
+[32m+[m[32m  for i in tqdm(range(n_combined), desc="Preprocess", disable=disable_tqdm):[m
+[32m+[m[32m    # 将实体的第一个和最后一个令牌放在序列的首尾.  确保输入序列的一致性[m
+[32m+[m[32m    input_ids = all_input_ids[i][m
+[32m+[m[32m    if len(input_ids)>max_seq_length:[m
+[32m+[m[32m      end_token=input_ids[-1][m
+[32m+[m[32m      input_ids=input_ids[:max_seq_length-1][m
+[32m+[m[32m      input_ids.append(end_token)[m
+[32m+[m[32m    token_type_ids = [0] * len(input_ids)[m
+[32m+[m[32m    attention_mask = [1] * len(input_ids)[m
+[32m+[m[32m    # keep only entity repr minus special tokens[m
+[32m+[m[32m    pooling_mask = [1]*len(input_ids)[m
+[32m+[m[32m    dataset.append({[m
+[32m+[m[32m      "input_ids": input_ids,[m
+[32m+[m[32m      "token_type_ids": token_type_ids,[m
+[32m+[m[32m      "attention_mask": attention_mask,[m
+[32m+[m[32m      "pooling_mask": pooling_mask,[m
+[32m+[m[32m    })[m
+[32m+[m[32m  # print("return dataset:",len(dataset))[m
+[32m+[m[32m  return dataset[m
+[32m+[m
+[32m+[m
+[32m+[m
+[32m+[m[32m# 生成编码后的单个例子的最后一步[m
+[32m+[m[32m# 生成不同entity的pooling mask[m
+[32m+[m[32mdef parse_tokenizer_output(tokenizer_output, max_seq_length, disable_tqdm=False):[m
+[32m+[m[32m  """Take tokenized output from sequence of left_ctx, entity, right_ctx and generate[m
+[32m+[m[32m  encoded examples with pooling masks"""[m
+[32m+[m[32m  all_input_ids = tokenizer_output.input_ids[m
+[32m+[m
+[32m+[m[32m  dataset = [][m
+[32m+[m[32m  assert len(all_input_ids) % 3 == 0[m
+[32m+[m[32m  n_combined = len(all_input_ids) // 3[m
+[32m+[m
+[32m+[m[32m  for i in tqdm(range(n_combined), desc="Preprocess", disable=disable_tqdm):[m
+[32m+[m[32m    left = all_input_ids[i * 3][m
+[32m+[m[32m    entity = all_input_ids[i * 3 + 1][m
+[32m+[m[32m    right = all_input_ids[i * 3 + 2][m
+[32m+[m
+[32m+[m[32m    # truncation[m
+[32m+[m[32m    token_type_ids = [][m
+[32m+[m[32m    attention_mask = [][m
+[32m+[m[32m    l_start = 1[m
+[32m+[m[32m    l_end = len(left) - 1[m
+[32m+[m[32m    r_start = 1[m
+[32m+[m[32m    r_end = len(right) - 1[m
+[32m+[m[32m    trunc_entity = False[m
+[32m+[m[32m    total_length = l_end - l_start + r_end - r_start + len(entity)[m
+[32m+[m[32m    if total_length > max_seq_length:[m
+[32m+[m[32m      quota_minus_entity = max_seq_length - len(entity)[m
+[32m+[m[32m      if quota_minus_entity < 0:[m
+[32m+[m[32m        # logger.warning(f"Entity {i} too long")[m
+[32m+[m[32m        l_start = l_end[m
+[32m+[m[32m        r_end = r_start[m
+[32m+[m[32m        trunc_entity = True[m
+[32m+[m[32m      else:[m
+[32m+[m[32m        quota_left = quota_right = quota_minus_entity // 2[m
+[32m+[m[32m        if quota_left + quota_right != quota_minus_entity:[m
+[32m+[m[32m          quota_left += 1[m
+[32m+[m[32m        l_start = max(0, l_end - quota_left)[m
+[32m+[m[32m        r_end = min(r_start + quota_right, len(right))[m
+[32m+[m
+[32m+[m[32m    if trunc_entity:[m
+[32m+[m[32m      end_token = entity[-1][m
+[32m+[m[32m      entity = entity[:max_seq_length - 1][m
+[32m+[m[32m      entity.append(end_token)[m
+[32m+[m
+[32m+[m
+[32m+[m[32m    # 将实体的第一个和最后一个令牌放在序列的首尾.  确保输入序列的一致性[m
+[32m+[m[32m    input_ids = [entity[0]] + left[l_start:l_end] + entity[1:-1] + right[r_start:r_end] + [entity[-1]][m
+[32m+[m[32m    token_type_ids = [0] * len(input_ids)[m
+[32m+[m[32m    attention_mask = [1] * len(input_ids)[m
+[32m+[m[32m    # keep only entity repr minus special tokens[m
+[32m+[m[32m    pooling_mask = [0] * (l_end - l_start + 1) + [1] * (len(entity) - 2) + [0] * (r_end - r_start + 1)[m
+[32m+[m
+[32m+[m[32m    assert len(pooling_mask) == len(input_ids), f"{len(input_ids)}, {len(entity)}, {len(pooling_mask)}"[m
+[32m+[m
+[32m+[m[32m    dataset.append({[m
+[32m+[m[32m        "input_ids": input_ids,[m
+[32m+[m[32m        "token_type_ids": token_type_ids,[m
+[32m+[m[32m        "attention_mask": attention_mask,[m
+[32m+[m[32m        "pooling_mask": pooling_mask,[m
+[32m+[m[32m    })[m
+[32m+[m[32m  return dataset[m
+[32m

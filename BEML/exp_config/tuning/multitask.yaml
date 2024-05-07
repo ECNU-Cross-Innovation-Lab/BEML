@@ -1,0 +1,23 @@
+
+#定义环境配置，模型调优等参数
+
+
+data_dir: ${preprocessing.multitask.output_dir}
+output_dir: ${run.iter_dir}/model
+use_triplet: false
+use_clf: true
+ablation: false
+
+train_batch_size: 128
+num_epochs: 10
+max_seq_length: 64
+clf_dropout: 0.1
+rnd_seed: ${run.rnd_seed}
+evaluation_steps: 2000
+checkpoint_save_total_limit: 2
+checkpoint_save_steps: 500
+cpu_per_job: 8
+sampling: 5  # for each attribute value, sample a few contexts that it appeared in, and use their average embedding
+batch_size: 32
+checkpoint_path: ${tuning.output_dir}/checkpoints
+gpu: ${run.train_gpu}

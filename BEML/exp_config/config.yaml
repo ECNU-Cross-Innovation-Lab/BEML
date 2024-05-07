@@ -1,0 +1,21 @@
+defaults:
+  - embedding: dir_config
+  - tuning: multitask
+  - _self_
+  - override hydra/job_logging: colorlog
+  - override hydra/hydra_logging: colorlog
+
+run:
+  embedding_sign: embedingSign
+  rnd_seed: 7
+  overwrite_output: true
+  exp_dir: PATH/TO/OUTPUT
+  rawdata_dir: PATH/TO/RAWDATA
+  labeled_dir: PATH/TO/LABELED
+  cv: 0
+  train_gpu: 0
+  n_inf_gpu: 1
+hydra:
+  run:
+    dir: ${run.exp_dir}/hydra/${now:%Y-%m-%d}/${now:%H-%M-%S}
+
